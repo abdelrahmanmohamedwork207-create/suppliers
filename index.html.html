@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suppliers Dashboard</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#1b1f24;--mut:#6b7280;--bd:#e3e6ea;--ac:#1d5fd1;--act:#fff;--bad:#c62828;--ok:#2e7d32;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1d2127;--tx:#e8eaed;--mut:#9aa3ad;--bd:#2d333b;--ac:#5b9bff;--act:#0b1220;--bad:#ef6a6a;--ok:#6fcf74}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.5}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-size:20px;margin:4px 0}.sub,.note{color:var(--mut);font-size:13px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin:14px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+label{display:block;font-size:12px;color:var(--mut);margin-bottom:3px}label b{color:var(--bad)}
+input,textarea{width:100%;padding:9px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+button{cursor:pointer;border:0;border-radius:8px;padding:9px 16px;font:inherit;background:var(--ac);color:var(--act)}
+button.ghost{background:transparent;color:var(--bad);border:1px solid var(--bd);padding:4px 10px;font-size:12px}
+button.sec{background:transparent;color:var(--tx);border:1px solid var(--bd)}button:disabled{opacity:.5}
+.msg{margin-top:10px;font-size:13px;min-height:18px}.err{color:var(--bad)}.ok{color:var(--ok)}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top;word-break:break-word}
+th{font-size:12px;color:var(--mut)}.bar{display:flex;gap:10px;align-items:center;margin-bottom:10px}.bar input{flex:1}
+.center{text-align:center;padding:40px 10px}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><div><h1>Suppliers Dashboard – Presales Team</h1><div class="sub" id="who"></div></div>
+  <button class="sec" id="out" hidden>Sign out</button></div>
+
+  <div id="login" class="card center" hidden>
+    <p>Sign in with your Google account to continue.</p>
+    <button id="in">Sign in with Google</button>
+    <div class="msg err" id="lmsg"></div>
+  </div>
+
+  <div id="app" hidden>
+    <div class="card">
+      <div class="grid">
+        <div><label>Supplier name <b>*</b></label><input id="f_name" placeholder="e.g. Comstor"></div>
+        <div><label>Email <b>*</b></label><input id="f_mail" type="email" placeholder="sales@supplier.com"></div>
+        <div><label>CC (optional)</label><input id="f_cc" placeholder="Separate several emails with a comma"></div>
+      </div>
+      <div style="margin-top:10px"><label>Notes (optional)</label><textarea id="f_notes" rows="2"></textarea></div>
+      <div style="margin-top:10px"><button id="add">Add supplier</button></div>
+      <div class="msg" id="msg"></div>
+    </div>
+    <div class="card">
+      <div class="bar"><input id="q" placeholder="Search by name, email, CC or notes…"><span class="note" id="count"></span></div>
+      <div class="tw"><table><thead><tr><th>Supplier</th><th>Email</th><th>CC</th><th>Notes</th><th>Added by</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="center note" id="empty" hidden>No suppliers yet.</div>
+    </div>
+    <div class="note">Everyone on the team can add. Only the owner can delete. A supplier that already exists can't be added again.</div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ====== 1) PASTE YOUR FIREBASE CONFIG HERE ======
+const firebaseConfig = {
+  apiKey: "AIzaSyBGWG_MfYf38LBvtEL_eaRPf1Tp4Qn2bqA",
+  authDomain: "pre---sales-team---suppliers-s.firebaseapp.com",
+  projectId: "pre---sales-team---suppliers-s",
+  appId: "1:764786101842:web:6fb0637907e5a150e7998b"
+};
+// ====== 2) YOUR (OWNER) GOOGLE EMAIL: shows the Delete button. The real protection is in the Firestore rules. ======
+const OWNER_EMAIL = "abdelrahmanmohamedwork207@gmail.com";
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const mailOk = s => /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(s);
+function normKey(name){
+  let s = name.toLowerCase().normalize("NFKC").replace(/[\u064B-\u0652\u0640]/g,"");
+  s = s.replace(/[^\p{L}\p{N}\s]/gu," ").replace(/\s+/g," ").trim();
+  return s.split(" ").filter(w=>!["llc","ltd","limited","co","company","fzco","fze","fzc","inc","trading","est","l","c"].includes(w)).join("");
+}
+function docId(key){
+  let h1=5381,h2=52711;
+  for(let i=0;i<key.length;i++){const c=key.charCodeAt(i);h1=((h1*33)^c)>>>0;h2=((h2*31)+c)>>>0;}
+  return "s"+h1.toString(16)+h2.toString(16)+key.length.toString(16);
+}
+function say(t,c){const m=$("msg");m.textContent=t;m.className="msg "+(c||"");}
+
+const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
+let me = null, items = [], unsub = null;
+const isOwner = () => me && me.email && me.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+
+$("in").onclick = async () => { try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch(e){ $("lmsg").textContent = "Sign-in failed."; } };
+$("out").onclick = () => signOut(auth);
+
+onAuthStateChanged(auth, user => {
+  me = user; if (unsub){unsub();unsub=null;}
+  $("login").hidden = !!user; $("app").hidden = !user; $("out").hidden = !user;
+  if (!user){ $("who").textContent = ""; return; }
+  $("who").textContent = "Signed in as " + user.email + (isOwner() ? " (owner)" : "");
+  unsub = onSnapshot(collection(db,"suppliers"), snap => {
+    items = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+    render();
+  }, () => { say("You don't have access, or the data couldn't load. Ask the owner to add your email.","err"); });
+});
+
+function render(){
+  const q = $("q").value.trim().toLowerCase();
+  const list = items.filter(r => !q || [r.name,r.mail,r.cc,r.notes].join(" ").toLowerCase().includes(q));
+  $("count").textContent = list.length + " / " + items.length;
+  $("empty").hidden = items.length > 0;
+  $("rows").innerHTML = list.map(r => `<tr><td><b>${esc(r.name)}</b></td>
+    <td><a href="mailto:${esc(r.mail)}">${esc(r.mail)}</a></td><td>${esc(r.cc)}</td><td>${esc(r.notes)}</td>
+    <td class="note">${esc(r.by)}</td>
+    <td>${isOwner()?`<button class="ghost" data-del="${esc(r.id)}">Delete</button>`:""}</td></tr>`).join("");
+}
+
+$("add").onclick = async () => {
+  const name=$("f_name").value.trim(), mail=$("f_mail").value.trim();
+  if(!name) return say("Supplier name is required.","err");
+  if(!mail) return say("Email is required.","err");
+  if(!mailOk(mail)) return say("Enter a valid email address.","err");
+  const key = normKey(name); if(!key) return say("Invalid supplier name.","err");
+  $("add").disabled = true;
+  try {
+    const ref = doc(db,"suppliers",docId(key));
+    const ex = await getDoc(ref);
+    if (ex.exists()) say('This supplier already exists as "'+ex.data().name+'". Nothing was added.',"err");
+    else {
+      await setDoc(ref,{name,key,mail,cc:$("f_cc").value.trim(),notes:$("f_notes").value.trim(),by:me.email,at:serverTimestamp()});
+      ["f_name","f_mail","f_cc","f_notes"].forEach(i=>$(i).value=""); say("Supplier added.","ok");
+    }
+  } catch(e){ say("Couldn't add. It may already exist, or your email isn't on the team list.","err"); }
+  $("add").disabled = false;
+};
+$("rows").onclick = async e => {
+  const id = e.target.dataset && e.target.dataset.del; if(!id || !isOwner()) return;
+  const r = items.find(x=>x.id===id);
+  if(!confirm("Delete "+(r?r.name:"this supplier")+"?")) return;
+  try { await deleteDoc(doc(db,"suppliers",id)); } catch(err){ say("Delete failed.","err"); }
+};
+$("q").oninput = render;
+</script>
+</body>
+</html>
