@@ -90,7 +90,7 @@ const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestor
 let me = null, items = [], unsub = null;
 const isOwner = () => me && me.email && me.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
 
-$("in").onclick = async () => { try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch(e){ $("lmsg").textContent = "Sign-in failed."; } };
+$("in").onclick = async () => { try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch(e){ $("lmsg").textContent = "Sign-in failed: " + (e.code || e.message || e); } };
 $("out").onclick = () => signOut(auth);
 
 onAuthStateChanged(auth, user => {
